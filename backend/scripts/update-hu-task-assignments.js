@@ -90,10 +90,11 @@ function parseDate(value) {
   return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 }
 
-async function ensureResource(nombre, rol) {
+async function ensureResource(nombre, rol, proyectoId = 2) {
   await Resource.findOrCreate({
-    where: { nombre },
+    where: { proyecto_id: proyectoId, nombre },
     defaults: {
+      proyecto_id: proyectoId,
       nombre,
       rol,
       horas_disponibles_semana: 40,

@@ -260,8 +260,9 @@ const modules = {
         'Si supera 100%, el dashboard recomendara rebalancear HU / SD.',
       ],
     },
-    filters: ['rol', 'estado'],
+    filters: ['proyecto_id', 'rol', 'estado'],
     fields: [
+      ['proyecto_id', 'project', 'Proyecto'],
       ['nombre', 'text', 'Nombre'],
       ['rol', 'select', 'Rol', ['ANALISTA', 'UX', 'DEV', 'QA', 'GESTOR', 'LIDER_TECNICO']],
       ['email', 'email', 'Email'],
@@ -269,7 +270,7 @@ const modules = {
       ['horas_asignadas_semana', 'number', 'Horas asignadas'],
       ['estado', 'select', 'Estado', ['ACTIVO', 'INACTIVO']],
     ],
-    columns: ['nombre', 'rol', 'email', 'horas_asignadas_semana', 'carga_porcentaje', 'estado'],
+    columns: ['nombre', 'proyecto_id', 'rol', 'email', 'horas_asignadas_semana', 'carga_porcentaje', 'estado'],
   },
   agreements: {
     title: 'Acuerdos',
@@ -1146,7 +1147,7 @@ function CrudPage({ module }) {
   const isScheduleModule = module.endpoint === '/schedule-items'
   const isTasksModule = module.endpoint === '/tasks'
   const isTaskStagesModule = module.endpoint === '/task-stages'
-  const needsProjects = hasFieldType(module, 'project')
+  const needsProjects = hasFieldType(module, 'project') || module.filters.includes('proyecto_id')
   const needsResources = hasFieldType(module, 'resource') || hasFieldType(module, 'resourceMulti')
   const needsScheduleItems = isScheduleModule || hasFieldType(module, 'scheduleParent') || hasFieldType(module, 'scheduleItem') || module.filters.includes('padre_id')
   const needsTasks = hasFieldType(module, 'task') || module.filters.includes('task_id')
@@ -1734,12 +1735,16 @@ function FilterField({ module, field, value, catalogs, filters, onChange }) {
   const fieldConfig = module.fields.find(([name]) => name === field)
   if (fieldConfig?.[1] === 'resourceMulti') {
     const [, , label, roles] = fieldConfig
-    const resources = catalogs.resources.filter((resource) => !roles?.length || roles.includes(resource.rol))
+    const resources = catalogs.resources.filter((resource) => {
+      if (filters.proyecto_id && Number(resource.proyecto_id) !== Number(filters.proyecto_id)) return false
+      return !roles?.length || roles.includes(resource.rol)
+    })
     return <ResourceAutocomplete id={`${field}-filter-options`} label={label} resources={resources} value={value} onChange={onChange} />
   }
 
   if (fieldConfig?.[1] === 'resource') {
-    return <ResourceAutocomplete id={`${field}-filter-options`} label={fieldConfig[2]} resources={catalogs.resources} value={value} onChange={onChange} />
+    const resources = catalogs.resources.filter((resource) => !filters.proyecto_id || Number(resource.proyecto_id) === Number(filters.proyecto_id))
+    return <ResourceAutocomplete id={`${field}-filter-options`} label={fieldConfig[2]} resources={resources} value={value} onChange={onChange} />
   }
 
   if (fieldConfig?.[1] === 'select') {
@@ -1886,11 +1891,12 @@ function Field({ type, label, options, value, form, catalogs, onChange }) {
     )
   }
   if (type === 'resource') {
+    const resources = catalogs.resources.filter((resource) => !form.proyecto_id || Number(resource.proyecto_id) === Number(form.proyecto_id))
     return (
       <label>{label}
         <select value={value || ''} onChange={(event) => onChange(event.target.value)}>
           <option value="">Sin asignar</option>
-          {catalogs.resources.map((resource) => <option key={resource.id} value={resource.nombre}>{resource.nombre} - {resource.rol}</option>)}
+          {resources.map((resource) => <option key={resource.id} value={resource.nombre}>{resource.nombre} - {resource.rol}</option>)}
         </select>
       </label>
     )
@@ -1898,7 +1904,10 @@ function Field({ type, label, options, value, form, catalogs, onChange }) {
   if (type === 'resourceMulti') {
     const allowedRoles = options || []
     const selected = String(value || '').split('\n').map((item) => item.trim()).filter(Boolean)
-    const resources = catalogs.resources.filter((resource) => !allowedRoles.length || allowedRoles.includes(resource.rol))
+    const resources = catalogs.resources.filter((resource) => {
+      if (form.proyecto_id && Number(resource.proyecto_id) !== Number(form.proyecto_id)) return false
+      return !allowedRoles.length || allowedRoles.includes(resource.rol)
+    })
 
     return (
       <label>{label}

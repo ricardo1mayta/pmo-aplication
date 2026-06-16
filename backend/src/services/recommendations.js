@@ -27,7 +27,7 @@ async function buildRecommendations(projectId) {
     Task.findAll({ where: buildProjectWhere(projectId), include: [Project] }),
     Risk.findAll({ where: buildProjectWhere(projectId), include: [Project] }),
     ScopeChange.findAll({ where: buildProjectWhere(projectId), include: [Project] }),
-    Resource.findAll(),
+    Resource.findAll({ where: buildProjectWhere(projectId), include: [Project] }),
     Agreement.findAll({ where: buildProjectWhere(projectId), include: [Project] }),
   ]);
 
@@ -112,7 +112,7 @@ async function dashboardSummary(projectId) {
     TaskStage.findAll({ where: buildProjectWhere(normalizedProjectId) }),
     Risk.findAll({ where: buildProjectWhere(normalizedProjectId) }),
     ScopeChange.findAll({ where: { ...buildProjectWhere(normalizedProjectId), estado: { [Op.in]: ['PENDIENTE', 'EN_EVALUACION'] } } }),
-    Resource.findAll(),
+    Resource.findAll({ where: buildProjectWhere(normalizedProjectId) }),
     Agreement.findAll({ where: buildProjectWhere(normalizedProjectId) }),
     buildRecommendations(normalizedProjectId),
   ]);

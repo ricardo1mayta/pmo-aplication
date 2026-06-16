@@ -52,7 +52,7 @@ mountCrud('/task-stages', crudController(TaskStage, {
 }));
 mountCrud('/risks', crudController(Risk, { filters: ['proyecto_id', 'estado', 'nivel'] }));
 mountCrud('/scope-changes', crudController(ScopeChange, { filters: ['proyecto_id', 'estado'] }));
-mountCrud('/resources', crudController(Resource, { filters: ['rol', 'estado'] }));
+mountCrud('/resources', crudController(Resource, { filters: ['proyecto_id', 'rol', 'estado'] }));
 mountCrud('/agreements', crudController(Agreement, { filters: ['proyecto_id', 'estado'] }));
 
 module.exports = router;

@@ -306,6 +306,7 @@ ScopeChange.beforeValidate((change) => {
 });
 
 const Resource = sequelize.define('Resource', {
+  proyecto_id: { type: DataTypes.INTEGER, allowNull: false },
   nombre: { type: DataTypes.STRING, allowNull: false },
   rol: { type: DataTypes.ENUM('ANALISTA', 'UX', 'DEV', 'QA', 'GESTOR', 'LIDER_TECNICO'), allowNull: false },
   email: { type: DataTypes.STRING, validate: { isEmail: true } },
@@ -371,6 +372,9 @@ Risk.belongsTo(Project, { foreignKey: 'proyecto_id' });
 
 Project.hasMany(ScopeChange, { foreignKey: { name: 'proyecto_id', allowNull: false }, onDelete: 'CASCADE' });
 ScopeChange.belongsTo(Project, { foreignKey: 'proyecto_id' });
+
+Project.hasMany(Resource, { foreignKey: { name: 'proyecto_id', allowNull: false }, onDelete: 'CASCADE' });
+Resource.belongsTo(Project, { foreignKey: 'proyecto_id' });
 
 Project.hasMany(Agreement, { foreignKey: { name: 'proyecto_id', allowNull: false }, onDelete: 'CASCADE' });
 Agreement.belongsTo(Project, { foreignKey: 'proyecto_id' });
