@@ -4,6 +4,7 @@ require('dotenv').config();
 
 const routes = require('./routes');
 const { sequelize } = require('./models');
+const { prepareDatabase } = require('./utils/databasePreparation');
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -25,6 +26,7 @@ app.use((error, req, res, next) => {
 async function start() {
   try {
     await sequelize.authenticate();
+    await prepareDatabase(sequelize);
     await sequelize.sync({ alter: true });
     app.listen(port, () => {
       console.log(`PMO API escuchando en http://localhost:${port}`);
