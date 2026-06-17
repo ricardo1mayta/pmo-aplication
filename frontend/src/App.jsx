@@ -16,7 +16,7 @@ import {
 import './App.css'
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'https://app.sismas.pe/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000/api',
 })
 
 api.interceptors.request.use((config) => {
@@ -60,6 +60,11 @@ const navIcons = {
   Cronograma: 'menu',
   'HU / SD': 'check',
   'Actividades HU': 'task',
+  Analicis: 'task',
+  UX: 'columns',
+  Desarrollo: 'task',
+  Calidad: 'check',
+  'Usuario final': 'user',
   Riesgos: 'filter',
   Cambios: 'edit',
   Recursos: 'user',
@@ -294,6 +299,67 @@ const modules = {
     ],
     columns: ['titulo', 'proyecto_id', 'responsable', 'fecha_compromiso', 'estado'],
   },
+}
+
+function buildStageTeamModule({ title, stages, defaultStage, roles, summary }) {
+  return {
+    ...modules.taskStages,
+    title,
+    help: {
+      summary,
+      tips: [
+        'Cada fila es una actividad de una HU y puede avanzar en paralelo con otras etapas.',
+        'Mantén responsables, fechas, horas y avance al dia para que la HU y el cronograma se actualicen.',
+        'Usa Bloqueado cuando el equipo no pueda continuar y deja el detalle en observaciones.',
+      ],
+    },
+    filters: ['proyecto_id', 'task_id', 'cronograma_item_id', 'estado', 'responsables'],
+    fields: modules.taskStages.fields.map((field) => (
+      field[0] === 'responsables' ? ['responsables', 'resourceMulti', 'Responsables', roles] : field
+    )),
+    columns: ['task_id', 'proyecto_id', 'cronograma_item_id', 'estado', 'responsables', 'avance', 'horas_estimadas', 'horas_ejecutadas', 'fecha_inicio', 'fecha_fin', 'dias_asignados', 'status_plazo'],
+    fixedEtapas: stages,
+    defaultValues: { etapa: defaultStage },
+    hiddenFields: stages.length === 1 ? ['etapa'] : [],
+  }
+}
+
+const stageTeamModules = {
+  functionalFlow: buildStageTeamModule({
+    title: 'Analicis',
+    stages: ['ANALISIS'],
+    defaultStage: 'ANALISIS',
+    roles: ['ANALISTA'],
+    summary: 'Controla el analisis funcional de cada HU vinculado al cronograma.',
+  }),
+  uxFlow: buildStageTeamModule({
+    title: 'UX',
+    stages: ['UX'],
+    defaultStage: 'UX',
+    roles: ['UX'],
+    summary: 'Controla prototipos, validaciones UX y avance de diseno por HU.',
+  }),
+  developmentFlow: buildStageTeamModule({
+    title: 'Desarrollo',
+    stages: ['DESARROLLO', 'CODE_REVIEW', 'DOCUMENTACION'],
+    defaultStage: 'DESARROLLO',
+    roles: ['DEV', 'LIDER_TECNICO'],
+    summary: 'Controla desarrollo, revision tecnica y documentacion sin perder el vinculo con HU y cronograma.',
+  }),
+  qualityFlow: buildStageTeamModule({
+    title: 'Calidad',
+    stages: ['QA'],
+    defaultStage: 'QA',
+    roles: ['QA'],
+    summary: 'Controla pruebas de calidad, bloqueos y cierre QA por HU.',
+  }),
+  userFlow: buildStageTeamModule({
+    title: 'Usuario final',
+    stages: ['UAT', 'FIRMA_USUARIO'],
+    defaultStage: 'UAT',
+    roles: [],
+    summary: 'Controla validacion UAT, firma, observaciones y cierre con usuario final.',
+  }),
 }
 
 function toChartData(source = {}) {
@@ -732,6 +798,12 @@ function Layout({ user, logout }) {
         <nav>
           <NavLink to="/" title="Dashboard"><Icon name={navIcons.Dashboard} /><span>Dashboard</span></NavLink>
           <NavLink to="/hu-flow" title="Canvas HU"><Icon name={navIcons['Canvas HU']} /><span>Canvas HU</span></NavLink>
+          {Object.entries(stageTeamModules).map(([key, module]) => (
+            <NavLink key={key} to={`/${key}`} title={module.title}>
+              <Icon name={navIcons[module.title] || 'task'} />
+              <span>{module.title}</span>
+            </NavLink>
+          ))}
           {Object.entries(modules).map(([key, module]) => (
             <NavLink key={key} to={`/${key}`} title={module.title}>
               <Icon name={navIcons[module.title] || 'panelLeft'} />
@@ -744,6 +816,9 @@ function Layout({ user, logout }) {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/hu-flow" element={<HuFlowBoard />} />
+        {Object.entries(stageTeamModules).map(([key, module]) => (
+          <Route key={key} path={`/${key}`} element={<CrudPage key={key} module={module} />} />
+        ))}
         {Object.entries(modules).map(([key, module]) => (
           <Route key={key} path={`/${key}`} element={<CrudPage key={key} module={module} />} />
         ))}
@@ -1120,6 +1195,7 @@ function HuFlowCard({ task, activities, projects }) {
 
 function CrudPage({ module }) {
   const initialForm = useMemo(() => Object.fromEntries(module.fields.map(([name, type, , options]) => {
+    if (module.defaultValues && Object.hasOwn(module.defaultValues, name)) return [name, module.defaultValues[name]]
     if (type === 'checkbox') return [name, false]
     if (['project', 'resource', 'resourceMulti', 'scheduleParent', 'scheduleItem', 'task'].includes(type)) return [name, '']
     return [name, options?.[0] || '']
@@ -1147,6 +1223,12 @@ function CrudPage({ module }) {
   const isScheduleModule = module.endpoint === '/schedule-items'
   const isTasksModule = module.endpoint === '/tasks'
   const isTaskStagesModule = module.endpoint === '/task-stages'
+  const visibleFields = useMemo(() => (
+    module.hiddenFields?.length
+      ? module.fields.filter(([name]) => !module.hiddenFields.includes(name))
+      : module.fields
+  ), [module])
+  const fixedEtapas = module.fixedEtapas || []
   const needsProjects = hasFieldType(module, 'project') || module.filters.includes('proyecto_id')
   const needsResources = hasFieldType(module, 'resource') || hasFieldType(module, 'resourceMulti')
   const needsScheduleItems = isScheduleModule || hasFieldType(module, 'scheduleParent') || hasFieldType(module, 'scheduleItem') || module.filters.includes('padre_id')
@@ -1342,8 +1424,10 @@ function CrudPage({ module }) {
       ? scheduleViewMode === 'activities'
         ? buildScheduleActivityRows(rows)
         : buildScheduleTreeRows(rows, visibleCollapsedScheduleIds)
-      : rows
-  ), [isScheduleModule, rows, scheduleViewMode, visibleCollapsedScheduleIds])
+      : fixedEtapas.length
+        ? rows.filter((row) => fixedEtapas.includes(row.etapa))
+        : rows
+  ), [fixedEtapas, isScheduleModule, rows, scheduleViewMode, visibleCollapsedScheduleIds])
   const allScheduleCollapsed = expandableScheduleIds.length > 0 && expandableScheduleIds.every((id) => visibleCollapsedScheduleIds.has(id))
 
   function toggleScheduleRow(id) {
@@ -1609,7 +1693,7 @@ function CrudPage({ module }) {
               ))}
             </tbody>
           </table>
-          {!rows.length && <p className="empty">Sin registros.</p>}
+          {!displayRows.length && <p className="empty">Sin registros.</p>}
         </section>
       </section>
 
@@ -1629,7 +1713,7 @@ function CrudPage({ module }) {
             </header>
             <form className="form modal-form" onSubmit={submit}>
               <div className="modal-form-grid">
-                {module.fields.map(([name, type, label, options]) => (
+                {visibleFields.map(([name, type, label, options]) => (
                   <Field key={name} type={type} label={label} options={options} value={form[name]} form={form} catalogs={catalogs} onChange={(value) => setForm({ ...form, [name]: value })} />
                 ))}
               </div>
