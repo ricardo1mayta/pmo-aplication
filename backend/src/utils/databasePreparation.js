@@ -60,7 +60,38 @@ async function prepareResourceProjectReferences(sequelize) {
   );
 }
 
+async function dropDuplicateUserEmailIndexes(sequelize) {
+  const hasUsersTable = await tableExists(sequelize, 'users');
+  if (!hasUsersTable) return;
+
+  const rows = await sequelize.query(
+    `
+      SELECT index_name
+      FROM information_schema.statistics
+      WHERE table_schema = DATABASE()
+        AND table_name = 'users'
+        AND column_name = 'email'
+        AND non_unique = 0
+      ORDER BY
+        CASE WHEN index_name = 'email' THEN 0 ELSE 1 END,
+        index_name
+    `,
+    { type: QueryTypes.SELECT },
+  );
+
+  const indexNames = [...new Set(rows.map((row) => row.index_name || row.INDEX_NAME))];
+  if (indexNames.length <= 1) return;
+
+  const [, ...duplicateIndexNames] = indexNames;
+  const queryInterface = sequelize.getQueryInterface();
+
+  for (const indexName of duplicateIndexNames) {
+    await queryInterface.removeIndex('users', indexName);
+  }
+}
+
 async function prepareDatabase(sequelize) {
+  await dropDuplicateUserEmailIndexes(sequelize);
   await prepareResourceProjectReferences(sequelize);
 }
 

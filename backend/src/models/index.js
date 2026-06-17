@@ -9,7 +9,7 @@ const {
 
 const User = sequelize.define('User', {
   nombre: { type: DataTypes.STRING, allowNull: false },
-  email: { type: DataTypes.STRING, allowNull: false, unique: true, validate: { isEmail: true } },
+  email: { type: DataTypes.STRING, allowNull: false, validate: { isEmail: true } },
   password_hash: { type: DataTypes.STRING, allowNull: false },
   rol: {
     type: DataTypes.ENUM('ADMIN', 'GESTOR', 'ANALISTA', 'UX', 'DEV', 'QA', 'LIDER_TECNICO'),
@@ -17,6 +17,8 @@ const User = sequelize.define('User', {
     defaultValue: 'GESTOR',
   },
   estado: { type: DataTypes.ENUM('ACTIVO', 'INACTIVO'), allowNull: false, defaultValue: 'ACTIVO' },
+}, {
+  indexes: [{ name: 'email', unique: true, fields: ['email'] }],
 });
 
 const Project = sequelize.define('Project', {
