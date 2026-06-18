@@ -17,6 +17,7 @@ import './App.css'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'https://app.sismas.pe/api',
+   // baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000/api',
 })
 
 api.interceptors.request.use((config) => {
@@ -382,10 +383,15 @@ function buildScheduleOptions(items) {
     group.sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0) || a.nombre.localeCompare(b.nombre))
   })
 
-  const walk = (parentId = 'root', level = 0) => (byParent[parentId] || []).flatMap((item) => [
-    { ...item, level, label: `${'  '.repeat(level)}${item.nombre}` },
-    ...walk(item.id, level + 1),
-  ])
+  const walk = (parentId = 'root', level = 0, parents = []) => (byParent[parentId] || []).flatMap((item) => {
+    const path = [...parents, item.nombre]
+    const pathLabel = path.join(' / ')
+
+    return [
+      { ...item, level, pathLabel, label: `${'  '.repeat(level)}${item.nombre}` },
+      ...walk(item.id, level + 1, path),
+    ]
+  })
 
   return walk()
 }
@@ -1800,14 +1806,14 @@ function FilterField({ module, field, value, catalogs, filters, onChange }) {
   if (field === 'padre_id') {
     const items = catalogs.scheduleItems.filter((item) => !filters.proyecto_id || Number(item.proyecto_id) === Number(filters.proyecto_id))
     return (
-      <ScheduleItemFilter id="schedule-parent-filter-options" label="Elemento padre" items={items} value={value} onChange={onChange} />
+      <ScheduleItemSelect label="Elemento padre" items={items} value={value} emptyLabel="Todos" onChange={onChange} />
     )
   }
 
   if (field === 'cronograma_item_id') {
     const items = catalogs.scheduleItems.filter((item) => !filters.proyecto_id || Number(item.proyecto_id) === Number(filters.proyecto_id))
     return (
-      <ScheduleItemFilter id="schedule-item-filter-options" label="Elemento cronograma" items={items} value={value} onChange={onChange} />
+      <ScheduleItemSelect label="Elemento cronograma" items={items} value={value} emptyLabel="Todos" onChange={onChange} />
     )
   }
 
@@ -1846,30 +1852,69 @@ function FilterField({ module, field, value, catalogs, filters, onChange }) {
   return <label>{field.replaceAll('_', ' ')}<input value={value} onChange={(event) => onChange(event.target.value)} /></label>
 }
 
-function ScheduleItemFilter({ id, label, items, value, onChange }) {
-  const optionLabel = (item) => `${item.label.trim()} (#${item.id})`
+function ScheduleItemSelect({ label, items, value, emptyLabel, onChange }) {
   const selected = items.find((item) => Number(item.id) === Number(value))
-  const [draft, setDraft] = useState({ value: '', text: '' })
-  const query = draft.value === String(value || '') ? draft.text : selected ? optionLabel(selected) : ''
+  const byParent = items.reduce((acc, item) => {
+    const key = item.padre_id || 'root'
+    acc[key] = acc[key] || []
+    acc[key].push(item)
+    return acc
+  }, {})
+  const byId = new Map(items.map((item) => [Number(item.id), item]))
+  const selectedPath = []
+  let current = selected
 
-  function update(nextQuery) {
-    const match = items.find((item) => optionLabel(item) === nextQuery)
-    const nextValue = match ? String(match.id) : ''
-    setDraft({ value: nextValue, text: nextQuery })
+  while (current) {
+    selectedPath.unshift(current)
+    current = current.padre_id ? byId.get(Number(current.padre_id)) : null
+  }
+
+  function optionsFor(parentId) {
+    return byParent[parentId || 'root'] || []
+  }
+
+  function changeSelection(nextValue) {
     onChange(nextValue)
   }
 
+  const levels = []
+  let parentId = 'root'
+  let level = 0
+
+  while (true) {
+    const options = optionsFor(parentId)
+    if (!options.length) break
+
+    const levelValue = selectedPath[level]?.id || ''
+    levels.push({ parentId, options, value: levelValue, level })
+    if (!levelValue) break
+
+    parentId = levelValue
+    level += 1
+  }
+
   return (
-    <label>{label}
-      <input
-        list={id}
-        placeholder="Buscar..."
-        value={query}
-        onChange={(event) => update(event.target.value)}
-      />
-      <datalist id={id}>
-        {items.map((item) => <option key={item.id} value={optionLabel(item)} />)}
-      </datalist>
+    <label className="schedule-select-field">{label}
+      <div className="schedule-cascade">
+        {levels.map((group) => (
+          <select
+            key={`${group.parentId}-${group.level}`}
+            value={group.value}
+            onChange={(event) => changeSelection(event.target.value)}
+          >
+            <option value="">{group.level === 0 ? emptyLabel : 'Selecciona hijo'}</option>
+            {group.options.map((item) => (
+              <option key={item.id} value={item.id}>{item.nombre} (#{item.id})</option>
+            ))}
+          </select>
+        ))}
+      </div>
+      {selected && (
+        <span className="selected-check">
+          <Icon name="check" />
+          {selected.pathLabel || selected.label.trim()}
+        </span>
+      )}
     </label>
   )
 }
@@ -1943,25 +1988,11 @@ function Field({ type, label, options, value, form, catalogs, onChange }) {
   }
   if (type === 'scheduleParent') {
     const items = catalogs.scheduleItems.filter((item) => Number(item.proyecto_id) === Number(form.proyecto_id) && Number(item.id) !== Number(form.id))
-    return (
-      <label>{label}
-        <select value={value || ''} onChange={(event) => onChange(event.target.value)}>
-          <option value="">Sin padre - primer nivel</option>
-          {items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-        </select>
-      </label>
-    )
+    return <ScheduleItemSelect label={label} items={items} value={value} emptyLabel="Sin padre - primer nivel" onChange={onChange} />
   }
   if (type === 'scheduleItem') {
     const items = catalogs.scheduleItems.filter((item) => Number(item.proyecto_id) === Number(form.proyecto_id))
-    return (
-      <label>{label}
-        <select value={value || ''} onChange={(event) => onChange(event.target.value)}>
-          <option value="">Sin vincular</option>
-          {items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-        </select>
-      </label>
-    )
+    return <ScheduleItemSelect label={label} items={items} value={value} emptyLabel="Sin vincular" onChange={onChange} />
   }
   if (type === 'task') {
     const tasks = catalogs.tasks.filter((task) => Number(task.proyecto_id) === Number(form.proyecto_id))
