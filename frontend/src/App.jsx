@@ -42,6 +42,7 @@ const iconPaths = {
   edit: <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />,
   eye: <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12ZM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />,
   filter: <path d="M4 5h16M7 12h10M10 19h4" />,
+  copy: <path d="M8 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2ZM4 16H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1" />,
   login: <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" />,
   logout: <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
@@ -1361,6 +1362,16 @@ function CrudPage({ module }) {
     setViewing(row)
   }
 
+  function duplicate(row) {
+    const copy = Object.fromEntries(Object.entries(row).filter(([key]) => !['id', 'created_at', 'updated_at'].includes(key)))
+    if (copy.nombre) copy.nombre = `${copy.nombre} - copia`
+    if (copy.titulo) copy.titulo = `${copy.titulo} - copia`
+    setError('')
+    setEditing(null)
+    setForm({ ...initialForm, ...copy })
+    setModalOpen(true)
+  }
+
   function addScheduleChild(row) {
     setError('')
     setEditing(null)
@@ -1690,6 +1701,9 @@ function CrudPage({ module }) {
                     )}
                     <button className="ghost icon-button" type="button" onClick={() => edit(row)} title="Editar" aria-label={`Editar ${row.nombre || row.titulo || 'registro'}`}>
                       <Icon name="edit" />
+                    </button>
+                    <button className="secondary icon-button" type="button" onClick={() => duplicate(row)} title={`Duplicar ${isTasksModule ? 'HU / SD' : isTaskStagesModule ? 'actividad' : 'registro'}`} aria-label={`Duplicar ${row.nombre || row.titulo || 'registro'}`}>
+                      <Icon name="copy" />
                     </button>
                     <button className="danger icon-button" type="button" onClick={() => remove(row.id)} title="Eliminar" aria-label={`Eliminar ${row.nombre || row.titulo || 'registro'}`}>
                       <Icon name="trash" />

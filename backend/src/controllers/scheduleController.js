@@ -1,15 +1,9 @@
-const { ScheduleItem } = require('../models');
+const { ScheduleItem, syncProjectProgress, syncScheduleBranches } = require('../models');
 
 function badRequest(message) {
   const error = new Error(message);
   error.status = 400;
   return error;
-}
-
-function average(values) {
-  if (!values.length) return null;
-  const total = values.reduce((sum, value) => sum + Number(value || 0), 0);
-  return Math.round((total / values.length) * 100) / 100;
 }
 
 async function validateParent(payload, currentId = null) {
@@ -32,37 +26,6 @@ async function validateParent(payload, currentId = null) {
       throw badRequest('No se puede mover un elemento dentro de uno de sus descendientes.');
     }
     ancestor = await ScheduleItem.findByPk(ancestor.padre_id);
-  }
-}
-
-async function recalculateNode(itemId) {
-  if (!itemId) return null;
-
-  const item = await ScheduleItem.findByPk(itemId);
-  if (!item) return null;
-
-  const children = await ScheduleItem.findAll({ where: { padre_id: itemId } });
-  if (!children.length) return item.padre_id;
-
-  await item.update({
-    avance_planificado: average(children.map((child) => child.avance_planificado)),
-    avance_real: average(children.map((child) => child.avance_real)),
-  });
-
-  return item.padre_id;
-}
-
-async function recalculateBranches(startIds) {
-  const pending = [...new Set(startIds.filter(Boolean).map(Number))];
-  const visited = new Set();
-
-  while (pending.length) {
-    const itemId = pending.shift();
-    if (visited.has(itemId)) continue;
-    visited.add(itemId);
-
-    const parentId = await recalculateNode(itemId);
-    if (parentId) pending.push(Number(parentId));
   }
 }
 
@@ -94,7 +57,8 @@ const scheduleController = {
     try {
       await validateParent(req.body);
       const row = await ScheduleItem.create(req.body);
-      await recalculateBranches([row.padre_id]);
+      await syncScheduleBranches([row.id, row.padre_id]);
+      await syncProjectProgress([row.proyecto_id]);
       res.status(201).json(await ScheduleItem.findByPk(row.id));
     } catch (error) {
       next(error);
@@ -110,7 +74,8 @@ const scheduleController = {
       const nextPayload = { ...row.toJSON(), ...req.body };
       await validateParent(nextPayload, row.id);
       await row.update(req.body);
-      await recalculateBranches([row.id, oldParentId, row.padre_id]);
+      await syncScheduleBranches([row.id, oldParentId, row.padre_id]);
+      await syncProjectProgress([row.previous('proyecto_id'), row.proyecto_id]);
 
       res.json(await ScheduleItem.findByPk(row.id));
     } catch (error) {
@@ -124,8 +89,10 @@ const scheduleController = {
       if (!row) return res.status(404).json({ message: 'Registro no encontrado.' });
 
       const parentId = row.padre_id;
+      const projectId = row.proyecto_id;
       await row.destroy();
-      await recalculateBranches([parentId]);
+      await syncScheduleBranches([parentId]);
+      await syncProjectProgress([projectId]);
       res.status(204).send();
     } catch (error) {
       next(error);

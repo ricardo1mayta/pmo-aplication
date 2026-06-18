@@ -205,6 +205,13 @@ async function syncScheduleNodeProgress(itemId) {
     });
   }
 
+  if (childAverage === null && taskAverage === null && stageAverage === null) {
+    await item.update({
+      avance_real: 0,
+      estado: item.estado === 'COMPLETADO' ? 'PENDIENTE' : item.estado,
+    });
+  }
+
   return item.padre_id;
 }
 
@@ -220,6 +227,39 @@ async function syncScheduleBranches(startIds) {
     const parentId = await syncScheduleNodeProgress(itemId);
     if (parentId) pending.push(Number(parentId));
   }
+
+  await syncProjectsFromScheduleItems(startIds);
+}
+
+async function syncProjectsFromScheduleItems(itemIds) {
+  const cleanIds = [...new Set(itemIds.filter(Boolean).map(Number))];
+  if (!cleanIds.length) return;
+
+  const items = await ScheduleItem.findAll({ where: { id: cleanIds } });
+  const projectIds = [...new Set(items.map((item) => item.proyecto_id).filter(Boolean).map(Number))];
+
+  await syncProjectProgress(projectIds);
+}
+
+async function syncProjectProgress(projectIds) {
+  const cleanIds = [...new Set([].concat(projectIds || []).filter(Boolean).map(Number))];
+
+  for (const projectId of cleanIds) {
+    const project = await Project.findByPk(projectId);
+    if (!project) continue;
+
+    const rootItems = await ScheduleItem.findAll({ where: { proyecto_id: projectId, padre_id: null } });
+    const scheduleAverage = rootItems.length ? average(rootItems.map((item) => item.avance_real)) : null;
+    const schedulePlanAverage = rootItems.length ? average(rootItems.map((item) => item.avance_planificado)) : null;
+    const tasks = scheduleAverage === null ? await Task.findAll({ where: { proyecto_id: projectId } }) : [];
+    const taskAverage = tasks.length ? average(tasks.map((task) => task.avance)) : null;
+    const nextProgress = scheduleAverage ?? taskAverage ?? 0;
+
+    await project.update({
+      avance_planificado: schedulePlanAverage ?? project.avance_planificado,
+      avance_real: nextProgress,
+    });
+  }
 }
 
 async function syncTaskFromStages(taskId) {
@@ -229,7 +269,16 @@ async function syncTaskFromStages(taskId) {
   if (!task) return;
 
   const stages = await TaskStage.findAll({ where: { task_id: taskId } });
-  if (!stages.length) return;
+  if (!stages.length) {
+    const updatedTask = await task.update({
+      avance: 0,
+      estado: 'BACKLOG',
+      responsable: null,
+    });
+    await syncScheduleBranches([updatedTask.cronograma_item_id]);
+    await syncProjectProgress([updatedTask.proyecto_id]);
+    return;
+  }
 
   const datesStart = stages.map((stage) => stage.fecha_inicio).filter(Boolean).sort();
   const datesEnd = stages.map((stage) => stage.fecha_fin).filter(Boolean).sort();
@@ -256,6 +305,7 @@ async function syncTaskFromStages(taskId) {
   });
 
   await syncScheduleBranches([updatedTask.cronograma_item_id]);
+  await syncProjectProgress([updatedTask.proyecto_id]);
 }
 
 const Risk = sequelize.define('Risk', {
@@ -324,20 +374,25 @@ Resource.beforeValidate((resource) => {
 
 Task.afterSave(async (task) => {
   await syncScheduleBranches([task.previous('cronograma_item_id'), task.cronograma_item_id]);
+  await syncProjectProgress([task.previous('proyecto_id'), task.proyecto_id]);
 });
 
 Task.afterDestroy(async (task) => {
   await syncScheduleBranches([task.cronograma_item_id]);
+  await syncProjectProgress([task.proyecto_id]);
 });
 
 TaskStage.afterSave(async (stage) => {
+  await syncTaskFromStages(stage.previous('task_id'));
   await syncTaskFromStages(stage.task_id);
   await syncScheduleBranches([stage.previous('cronograma_item_id'), stage.cronograma_item_id]);
+  await syncProjectProgress([stage.previous('proyecto_id'), stage.proyecto_id]);
 });
 
 TaskStage.afterDestroy(async (stage) => {
   await syncTaskFromStages(stage.task_id);
   await syncScheduleBranches([stage.cronograma_item_id]);
+  await syncProjectProgress([stage.proyecto_id]);
 });
 
 const Agreement = sequelize.define('Agreement', {
@@ -381,4 +436,17 @@ Resource.belongsTo(Project, { foreignKey: 'proyecto_id' });
 Project.hasMany(Agreement, { foreignKey: { name: 'proyecto_id', allowNull: false }, onDelete: 'CASCADE' });
 Agreement.belongsTo(Project, { foreignKey: 'proyecto_id' });
 
-module.exports = { sequelize, User, Project, ScheduleItem, Task, TaskStage, Risk, ScopeChange, Resource, Agreement };
+module.exports = {
+  sequelize,
+  User,
+  Project,
+  ScheduleItem,
+  Task,
+  TaskStage,
+  Risk,
+  ScopeChange,
+  Resource,
+  Agreement,
+  syncScheduleBranches,
+  syncProjectProgress,
+};
