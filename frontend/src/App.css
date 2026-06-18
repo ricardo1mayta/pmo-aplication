@@ -947,6 +947,40 @@ th {
   text-transform: uppercase;
 }
 
+.column-sort-button {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font-size: inherit;
+  text-transform: inherit;
+  white-space: normal;
+}
+
+.column-sort-button:hover {
+  color: var(--color-text);
+  background: transparent;
+}
+
+.column-sort-button span {
+  color: var(--color-primary);
+  font-size: 10px;
+}
+
+.column-filter-row th {
+  background: #f3fbfe;
+  padding: 7px 8px;
+}
+
+.column-filter-row input {
+  min-height: 30px;
+  padding: 5px 7px;
+  font-size: 12px;
+  text-transform: none;
+}
+
 .actions {
   display: flex;
   gap: 8px;

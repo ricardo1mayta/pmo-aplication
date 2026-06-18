@@ -615,7 +615,41 @@ function buildCsv(rows, columns) {
   ].join('\n')
 }
 
+function normalizeCsvHeader(header) {
+  const normalized = String(header || '')
+    .replace(/^\uFEFF/, '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replaceAll(' ', '_')
+
+  const aliases = {
+    titulo: 'titulo',
+    title: 'titulo',
+    descripcion: 'descripcion',
+    description: 'descripcion',
+    proyecto: 'proyecto_id',
+    project: 'proyecto_id',
+    elemento_cronograma: 'cronograma_item_id',
+    cronograma: 'cronograma_item_id',
+    inicio: 'fecha_inicio',
+    fin: 'fecha_fin',
+    responsable_principal: 'responsable',
+  }
+
+  return aliases[normalized] || normalized
+}
+
+function detectCsvDelimiter(content) {
+  const firstLine = String(content || '').split(/\r?\n/, 1)[0] || ''
+  const commaCount = (firstLine.match(/,/g) || []).length
+  const semicolonCount = (firstLine.match(/;/g) || []).length
+  return semicolonCount > commaCount ? ';' : ','
+}
+
 function parseCsv(content) {
+  const delimiter = detectCsvDelimiter(content)
   const rows = []
   let row = []
   let value = ''
@@ -636,7 +670,7 @@ function parseCsv(content) {
       }
     } else if (char === '"') {
       quoted = true
-    } else if (char === ',') {
+    } else if (char === delimiter) {
       row.push(value)
       value = ''
     } else if (char === '\n') {
@@ -653,7 +687,8 @@ function parseCsv(content) {
   rows.push(row)
 
   const [headers = [], ...dataRows] = rows.filter((item) => item.some((cell) => cell !== ''))
-  return dataRows.map((dataRow) => Object.fromEntries(headers.map((header, index) => [header, dataRow[index] ?? ''])))
+  const normalizedHeaders = headers.map(normalizeCsvHeader)
+  return dataRows.map((dataRow) => Object.fromEntries(normalizedHeaders.map((header, index) => [header, dataRow[index] ?? ''])))
 }
 
 function getExpandableScheduleIds(items) {
@@ -699,6 +734,49 @@ function columnLabel(column) {
   }
 
   return labels[column] || column.replaceAll('_', ' ')
+}
+
+function normalizeSearchValue(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
+function getAssignedDaysText(row) {
+  if (!row?.fecha_inicio || !row?.fecha_fin) return 'Sin rango'
+  const startDate = new Date(`${row.fecha_inicio}T00:00:00`)
+  const endDate = new Date(`${row.fecha_fin}T00:00:00`)
+  const days = Math.floor((endDate - startDate) / 86400000) + 1
+  if (days < 1) return 'Rango invalido'
+  return `${days} dia${days === 1 ? '' : 's'}`
+}
+
+function getDeadlineStatusText(row) {
+  if (!row?.fecha_fin) return 'Sin fecha'
+  if (Number(row.avance || 0) >= 100 || ['DONE', 'COMPLETADO', 'FINALIZADO', 'CERRADO'].includes(row.estado)) return 'Cerrado'
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const endDate = new Date(`${row.fecha_fin}T00:00:00`)
+  const diffDays = Math.ceil((endDate - today) / 86400000)
+
+  if (diffDays < 0) return 'Atrasado'
+  if (diffDays === 0) return 'Vence hoy'
+  return `${diffDays} dias`
+}
+
+function getColumnText(row, column, catalogs) {
+  if (column === 'tree') return row.activityPath || row.pathLabel || row.label || row.nombre || ''
+  if (column === 'proyecto_id') return catalogs.projects.find((item) => Number(item.id) === Number(row.proyecto_id))?.nombre || row.proyecto_id
+  if (column === 'task_id') return catalogs.tasks.find((item) => Number(item.id) === Number(row.task_id))?.titulo || row.task_id
+  if (['padre_id', 'cronograma_item_id'].includes(column)) {
+    const item = catalogs.scheduleItems.find((scheduleItem) => Number(scheduleItem.id) === Number(row[column]))
+    return item?.pathLabel || item?.label?.trim() || row[column]
+  }
+  if (column === 'dias_asignados') return getAssignedDaysText(row)
+  if (column === 'status_plazo') return getDeadlineStatusText(row)
+  return row[column]
 }
 
 function statusClass(value) {
@@ -1222,6 +1300,8 @@ function CrudPage({ module }) {
   const [modalOpen, setModalOpen] = useState(false)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
   const [filters, setFilters] = useState({})
+  const [columnFilters, setColumnFilters] = useState({})
+  const [sortConfig, setSortConfig] = useState({ column: '', direction: 'asc' })
   const [collapsedScheduleIds, setCollapsedScheduleIds] = useState(getStoredScheduleCollapsedIds)
   const [scheduleViewMode, setScheduleViewMode] = useState(getStoredScheduleViewMode)
   const [error, setError] = useState('')
@@ -1257,6 +1337,27 @@ function CrudPage({ module }) {
 
   function clearFilters() {
     setFilters({})
+  }
+
+  function updateColumnFilter(column, value) {
+    setColumnFilters((current) => {
+      const next = { ...current }
+      if (value) next[column] = value
+      else delete next[column]
+      return next
+    })
+  }
+
+  function clearColumnFilters() {
+    setColumnFilters({})
+  }
+
+  function toggleSort(column) {
+    setSortConfig((current) => {
+      if (current.column !== column) return { column, direction: 'asc' }
+      if (current.direction === 'asc') return { column, direction: 'desc' }
+      return { column: '', direction: 'asc' }
+    })
   }
 
   const loadCatalogs = useCallback(async () => {
@@ -1445,6 +1546,28 @@ function CrudPage({ module }) {
         ? rows.filter((row) => fixedEtapas.includes(row.etapa))
         : rows
   ), [fixedEtapas, isScheduleModule, rows, scheduleViewMode, visibleCollapsedScheduleIds])
+  const tableRows = useMemo(() => {
+    const activeFilters = Object.entries(columnFilters).filter(([, value]) => value)
+    const filteredRows = activeFilters.length
+      ? displayRows.filter((row) => activeFilters.every(([column, value]) => (
+        normalizeSearchValue(getColumnText(row, column, catalogs)).includes(normalizeSearchValue(value))
+      )))
+      : displayRows
+
+    if (!sortConfig.column) return filteredRows
+
+    return [...filteredRows].sort((first, second) => {
+      const firstRaw = getColumnText(first, sortConfig.column, catalogs)
+      const secondRaw = getColumnText(second, sortConfig.column, catalogs)
+      const firstNumber = Number(firstRaw)
+      const secondNumber = Number(secondRaw)
+      const compare = Number.isFinite(firstNumber) && Number.isFinite(secondNumber)
+        ? firstNumber - secondNumber
+        : normalizeSearchValue(firstRaw).localeCompare(normalizeSearchValue(secondRaw), 'es', { numeric: true })
+
+      return sortConfig.direction === 'asc' ? compare : -compare
+    })
+  }, [catalogs, columnFilters, displayRows, sortConfig])
   const allScheduleCollapsed = expandableScheduleIds.length > 0 && expandableScheduleIds.every((id) => visibleCollapsedScheduleIds.has(id))
 
   function toggleScheduleRow(id) {
@@ -1627,7 +1750,7 @@ function CrudPage({ module }) {
             <div className="table-toolbar">
               <div>
                 <strong>{isScheduleModule ? (scheduleViewMode === 'activities' ? 'Actividades y subactividades' : 'Vista del cronograma') : 'Carga de HU'}</strong>
-                <span>{displayRows.length} de {rows.length} elementos visibles</span>
+                <span>{tableRows.length} de {displayRows.length} elementos visibles</span>
               </div>
               <div className="toolbar-actions">
                 {isScheduleModule && (
@@ -1663,12 +1786,36 @@ function CrudPage({ module }) {
           <table>
             <thead>
               <tr>
-                {module.columns.map((column) => <th key={column}>{columnLabel(column)}</th>)}
+                {module.columns.map((column) => (
+                  <th key={column}>
+                    <button className="column-sort-button" type="button" onClick={() => toggleSort(column)}>
+                      {columnLabel(column)}
+                      {sortConfig.column === column && <span>{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>}
+                    </button>
+                  </th>
+                ))}
                 <th></th>
+              </tr>
+              <tr className="column-filter-row">
+                {module.columns.map((column) => (
+                  <th key={`${column}-filter`}>
+                    <input
+                      aria-label={`Buscar por ${columnLabel(column)}`}
+                      value={columnFilters[column] || ''}
+                      onChange={(event) => updateColumnFilter(column, event.target.value)}
+                      placeholder="Buscar..."
+                    />
+                  </th>
+                ))}
+                <th>
+                  <button className="ghost icon-button" type="button" onClick={clearColumnFilters} title="Limpiar busqueda" aria-label="Limpiar busqueda por columnas">
+                    <Icon name="x" />
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {displayRows.map((row) => (
+              {tableRows.map((row) => (
                 <tr className={isScheduleModule ? `schedule-row level-${Math.min(row.level || 0, 4)} ${row.hasChildren ? 'summary-row' : ''}` : ''} key={row.id}>
                   {module.columns.map((column) => (
                     <td key={column}>
@@ -1713,7 +1860,7 @@ function CrudPage({ module }) {
               ))}
             </tbody>
           </table>
-          {!displayRows.length && <p className="empty">Sin registros.</p>}
+          {!tableRows.length && <p className="empty">Sin registros.</p>}
         </section>
       </section>
 
