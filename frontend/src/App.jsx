@@ -26,6 +26,11 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+function clearStoredAuth() {
+  localStorage.removeItem('pmo_token')
+  localStorage.removeItem('pmo_user')
+}
+
 const colors = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#7c3aed', '#0891b2']
 const scheduleCollapseStorageKey = 'pmo_schedule_collapsed_ids'
 const scheduleViewStorageKey = 'pmo_schedule_view_mode'
@@ -789,15 +794,42 @@ function statusClass(value) {
 }
 
 function useAuth() {
-  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('pmo_user') || 'null'))
+  const [user, setUser] = useState(() => {
+    const token = localStorage.getItem('pmo_token')
+    if (!token) {
+      clearStoredAuth()
+      return null
+    }
+    return JSON.parse(localStorage.getItem('pmo_user') || 'null')
+  })
+
+  useEffect(() => {
+    const interceptor = api.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        const isUnauthorized = error.response?.status === 401
+        const requestUrl = error.config?.url || ''
+        const isAuthRequest = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register')
+
+        if (isUnauthorized && !isAuthRequest) {
+          clearStoredAuth()
+          setUser(null)
+        }
+
+        return Promise.reject(error)
+      },
+    )
+
+    return () => api.interceptors.response.eject(interceptor)
+  }, [])
+
   const login = (payload) => {
     localStorage.setItem('pmo_token', payload.token)
     localStorage.setItem('pmo_user', JSON.stringify(payload.user))
     setUser(payload.user)
   }
   const logout = () => {
-    localStorage.removeItem('pmo_token')
-    localStorage.removeItem('pmo_user')
+    clearStoredAuth()
     setUser(null)
   }
   return { user, login, logout }
@@ -896,7 +928,7 @@ function Layout({ user, logout }) {
             </NavLink>
           ))}
         </nav>
-        <button className="ghost sidebar-logout" onClick={logout} title="Salir"><Icon name="logout" /><span>Salir</span></button>
+        <button className="ghost sidebar-logout" type="button" onClick={logout} title="Cerrar sesion"><Icon name="logout" /><span>Cerrar sesion</span></button>
       </aside>
       <Routes>
         <Route path="/" element={<Dashboard />} />
